@@ -1,0 +1,18 @@
+# Generated database — rebuild with:
+#   python naics.py && python ingest_osm.py "Concord, Middlesex County, Massachusetts, USA"
+businesses.db
+businesses.db-wal
+businesses.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
