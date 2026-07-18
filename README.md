@@ -193,9 +193,47 @@ derive.py        storefront / restaurant inference rules (audit these here)
 naics.py         OSM-tag -> NAICS crosswalk + 2-digit sector names
 ingest_osm.py    Overpass -> database, idempotent, mirror fallback
 query.py         low-level SQL query surface (single-town, debugging)
+agentfacts.py    generates the NANDA AgentFacts descriptor (provisional schema)
 .env.example     committed template — copy to .env, never commit .env
 businesses.db    SQLite database (generated, gitignored)
 ```
+
+## NANDA registration (AgentFacts)
+
+```bash
+python agentfacts.py -o agentfacts.json
+```
+
+Generates the AgentFacts descriptor from **live database state** — capabilities,
+places served, business counts, and NAICS sectors are read from the database
+rather than hand-maintained, so the document cannot drift from what the agent
+actually does.
+
+It also carries **ODbL attribution in-band**, under `provenance.sources`. That is
+the mechanism by which the OpenStreetMap credit reaches a consuming agent instead
+of dying at the API boundary.
+
+> ### ⚠️ Schema is provisional — not validated against the canonical spec
+>
+> The `@context` URL cited across the NANDA literature,
+> `https://spec.projectnanda.org/agentfacts/v1`, **does not resolve in DNS**
+> (checked 2026-07-18; `projectnanda.org` and `index.projectnanda.org` both
+> resolve, `spec.projectnanda.org` does not).
+>
+> Field names are reconstructed from *Beyond DNS: Unlocking the Internet of AI
+> Agents via the NANDA Index and Verified AgentFacts*
+> ([arXiv:2507.14263](https://arxiv.org/abs/2507.14263)), Table 5, cross-checked
+> against published examples. Validate before registering.
+
+Two things are required and deliberately **not** done here:
+
+1. **`id` must be a real DID.** The placeholder is not resolvable.
+2. **The document must be signed** as a W3C Verifiable Credential v2. This
+   generator emits the unsigned payload only — signing needs a key this
+   repository does not hold and should not.
+
+Set identity via `.env` (`NANDA_HANDLE`, `NANDA_AGENT_DID`, `NANDA_OWNER_DID`,
+`NANDA_ENDPOINT`); `agentfacts.py` warns about any that are still placeholders.
 
 ## Operational hazards handled
 
