@@ -134,6 +134,14 @@ def _emit(rows, args, cols) -> None:
 
 
 def main() -> None:
+    # Same guard as agent.py: cp1252 consoles cannot encode many business
+    # names; print "?" for those characters instead of crashing mid-listing.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--json", action="store_true", help="emit JSON (agent-facing)")

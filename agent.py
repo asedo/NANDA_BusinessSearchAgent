@@ -198,6 +198,16 @@ def _print_human(res: dict) -> None:
 
 
 def main() -> None:
+    # Windows consoles often use cp1252, which cannot encode many business
+    # names (Somerville MA crashed on its Korean and Chinese restaurants).
+    # errors="replace" keeps the console's encoding and prints "?" for what it
+    # cannot show, rather than dying mid-listing. The xlsx/JSON stay UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass  # non-reconfigurable stream (e.g. redirected); leave it be
+
     ap = argparse.ArgumentParser(
         description="Return businesses and NAICS classification for a US town. "
                     "(US only for now; other countries will be added later.)")
@@ -208,6 +218,8 @@ def main() -> None:
     ap.add_argument("--refresh", action="store_true",
                     help="force re-fetch from OSM, ignoring cache")
     ap.add_argument("--json", action="store_true", help="emit JSON")
+    ap.add_argument("--no-export", action="store_true",
+                    help="skip writing the per-town xlsx to exports/")
     args = ap.parse_args()
 
     try:
@@ -216,7 +228,16 @@ def main() -> None:
     except (ingest_osm.ResolveError, ingest_osm.OverpassError) as exc:
         sys.exit(f"error: {exc}")
 
-    print(json.dumps(res, indent=2)) if args.json else _print_human(res)
+    if args.json:
+        # JSON mode is the machine interface: no disk side effects.
+        print(json.dumps(res, indent=2))
+        return
+
+    _print_human(res)
+    if not args.no_export and res["businesses"]:
+        import export  # lazy: export imports agent, so a top-level import would cycle
+        path = export.export_town(res)
+        print(f"\n  exported: {path}")
 
 
 if __name__ == "__main__":

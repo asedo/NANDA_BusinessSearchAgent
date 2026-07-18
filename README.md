@@ -61,14 +61,21 @@ lookup returns classified businesses with provenance attached.
 ## Quick start — ask the agent about a town
 
 ```bash
-python agent.py Concord MA                # businesses + NAICS for a town
-python agent.py Lexington MA --json       # agent-to-agent JSON
+python agent.py Concord MA                # businesses + NAICS for a US town
+python agent.py Lexington MA --json       # agent-to-agent JSON (no file written)
 python agent.py Concord MA --naics 72     # food service only (NAICS prefix)
 python agent.py Concord MA --refresh      # force re-fetch, ignore cache
+python agent.py Concord MA --no-export    # skip the xlsx side effect
 ```
 
 Everything bootstraps on first call: the NAICS crosswalk builds itself, the town
-is resolved against OpenStreetMap, and results are cached for 7 days.
+is resolved against OpenStreetMap, and results are cached for 7 days. US towns
+only for now; other countries will be added later.
+
+Every query also writes (or refreshes) one workbook per town at
+`exports/<Town>_<ST>_businesses.xlsx`. A **Data Updated** column on every row
+carries the date the town's data was fetched from OSM — not the export date —
+so a row stays self-describing when copied out of the file.
 
 ```python
 from agent import lookup
@@ -78,13 +85,14 @@ result = lookup("Concord", "MA", naics_prefix="722511")
 **No credentials are required.** OpenStreetMap, Overpass, and Nominatim are all
 keyless — this runs with no `.env` file at all.
 
-### Verified across three towns
+### Verified across four towns
 
 | Query | Resolved | Businesses | With NAICS | Storefronts | Restaurants |
 |---|---|---:|---:|---:|---:|
 | `Concord MA` | Middlesex County, MA | 156 | 141 (90%) | 140 | 31 |
 | `Lexington MA` | Middlesex County, MA | 195 | 181 (93%) | 167 | 42 |
 | `Concord NH` | Merrimack County, NH | 588 | 519 (88%) | 491 | 123 |
+| `Somerville MA` | Middlesex County, MA | 776 | 705 (91%) | 697 | 229 |
 
 Concord MA and Concord NH resolve independently, which is the point of the
 `place` table — `addr_city` is only ~57% populated in OSM and cannot scope a town.
@@ -286,7 +294,7 @@ requiring a manual per-entity lookup. Recommend storing officer *names* and
 ```
 agent.py         THE AGENT — lookup(town, state) -> businesses + NAICS
 verify.py        environment + pipeline verification (CI gate)
-export.py        export a town to .xlsx or CSV
+export.py        export a town to .xlsx or CSV (one file per town, in exports/)
 enrich_web.py    stage 3 — website -> one-sentence description (needs API key)
 setup.ps1 / .sh  create .venv and verify
 schema.sql       tables, indexes, business_fact view

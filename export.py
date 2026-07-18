@@ -50,9 +50,12 @@ COLUMNS: list[tuple[str, str, str]] = [
     ("Website",         "website",           "s"),
     ("Opening Hours",   "opening_hours",     "s"),
     ("Cuisine",         "cuisine",           "s"),
+    # When OSM was fetched for this town - not the export date. Repeated on
+    # every row so a row stays self-describing when copied out of the file.
+    ("Data Updated",    "data_updated",      "s"),
 ]
 
-WIDTHS = [34, 78, 12, 12, 9, 38, 8, 34, 14, 22, 10, 10, 30, 16, 11, 11, 11, 22, 42, 34, 24]
+WIDTHS = [34, 78, 12, 12, 9, 38, 8, 34, 14, 22, 10, 10, 30, 16, 11, 11, 11, 22, 42, 34, 24, 13]
 
 
 # --------------------------------------------------------------- xlsx writer
@@ -172,10 +175,17 @@ def write_xlsx(path: pathlib.Path, sheets: list[tuple[str, list[str], list[list]
 
 # ------------------------------------------------------------------- export
 
+def _updated_date(res: dict) -> str:
+    """Date (not time) the town's data was last fetched from OSM."""
+    return (res["provenance"]["observed"] or "")[:10]
+
+
 def build_sheets(res: dict):
     kinds = [k for _, _, k in COLUMNS]
     headers = [h for h, _, _ in COLUMNS]
-    rows = [[b.get(key) for _, key, _ in COLUMNS] for b in res["businesses"]]
+    updated = _updated_date(res)
+    rows = [[{**b, "data_updated": updated}.get(key) for _, key, _ in COLUMNS]
+            for b in res["businesses"]]
 
     c, prov, place = res["counts"], res["provenance"], res["place"]
     summary = [
@@ -190,7 +200,7 @@ def build_sheets(res: dict):
         ["NAICS sector", "Count"],
         *[[k, str(v)] for k, v in res["naics_sectors"].items()],
         ["", ""],
-        ["Data observed", prov["observed"]],
+        ["Data updated (OSM fetch)", prov["observed"]],
         ["Exported", _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")],
     ]
 
@@ -217,16 +227,30 @@ def build_sheets(res: dict):
 
 def write_csv(path: pathlib.Path, res: dict) -> None:
     # utf-8-sig: Excel needs the BOM to read UTF-8 correctly on Windows.
+    updated = _updated_date(res)
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow([h for h, _, _ in COLUMNS])
         for b in res["businesses"]:
+            b = {**b, "data_updated": updated}
             row = []
             for _, key, kind in COLUMNS:
                 v = b.get(key)
                 row.append("" if v is None else
                            ("Yes" if v else "No") if kind == "b" else v)
             w.writerow(row)
+
+
+def export_town(res: dict, out_dir: pathlib.Path | str = "exports") -> pathlib.Path:
+    """Write one xlsx per town into out_dir; stable name, overwritten on
+    refresh so the file always mirrors the latest data. Used by agent.py to
+    export automatically after every query."""
+    q = res["query"]
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{q['town']}_{q['state']}_businesses.xlsx".replace(" ", "_")
+    write_xlsx(path, build_sheets(res))
+    return path
 
 
 def main() -> None:
@@ -252,7 +276,12 @@ def main() -> None:
     ext = "csv" if args.csv else "xlsx"
     suffix = f"_naics{args.naics}" if args.naics else ""
     default = f"{args.town}_{args.state}{suffix}_businesses.{ext}".replace(" ", "_")
-    path = pathlib.Path(args.output or default)
+    if args.output:
+        path = pathlib.Path(args.output)
+    else:
+        # Same folder agent.py auto-exports into: one file per town.
+        path = pathlib.Path("exports") / default
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     if args.csv:
         write_csv(path, res)
