@@ -353,6 +353,20 @@ the next mirror beats an immediate retry. `overpass.osm.jp` was removed from the
 list: its TLS certificate fails hostname validation, and the only workaround
 would be disabling certificate verification.
 
+**Mirrors must be full-planet, and the query proves it.** `overpass.osm.ch` was
+removed after it answered a Somerville MA query with HTTP 200 and zero elements
+— it is the Swiss OSM association's regional instance and hosts only
+Switzerland, so the empty answer was cached as a valid "0 businesses". The
+ingest query now emits the area itself (`.a out ids;`) as a coverage proof: a
+mirror whose response lacks the area element is treated as failed and the next
+mirror is tried, making "no coverage" distinguishable from "town with no
+businesses". `verify.py` probes every configured mirror for US coverage.
+
+**US towns only, for now.** Nominatim drops query parts it cannot match, so
+even a query ending in ", USA" can resolve abroad. `resolve_area()` requests
+`addressdetails` and rejects any place whose country code is not `us` with a
+clear message; workflows for other countries will be added later.
+
 **Towns must resolve to an OSM relation.** Overpass builds query areas from
 administrative boundaries; a town resolving only to a node or way has no polygon
 to search inside. `resolve_area()` scans up to five Nominatim hits for a relation

@@ -48,9 +48,11 @@ def check_python() -> None:
     v = sys.version_info
     check(f"interpreter {v.major}.{v.minor}.{v.micro}", v[:2] >= MIN_PY,
           f"requires >= {MIN_PY[0]}.{MIN_PY[1]}")
-    check("running inside a virtual environment",
-          sys.prefix != sys.base_prefix,
-          "recommended, not required" if sys.prefix == sys.base_prefix else sys.prefix)
+    # Informational, never fatal: the project is stdlib-only, so running
+    # outside a venv works fine. A recommendation must not fail the CI gate.
+    in_venv = sys.prefix != sys.base_prefix
+    check("virtual environment", True,
+          sys.prefix if in_venv else "not active (recommended, not required)")
 
 
 def _declared_optional() -> set[str]:
@@ -179,6 +181,39 @@ def check_schema() -> None:
     check("business_fact view", "business_fact" in views)
 
 
+def check_mirrors(offline: bool) -> None:
+    """Every configured Overpass mirror must host US data.
+
+    A regional mirror (e.g. overpass.osm.ch, Switzerland-only) answers HTTP 200
+    with zero elements for a US area, which once got cached as a valid
+    "0 businesses" for Somerville MA. Unreachable mirrors are only noted, not
+    failed - transient outages are why a fallback list exists at all.
+    """
+    section("Overpass mirror coverage (live)")
+    if offline:
+        print("  [SKIP] --offline: no network calls made")
+        return
+    import json
+    import urllib.parse
+    import urllib.request
+    import ingest_osm
+    probe = "[out:json][timeout:20];area(3601840166);out ids;"  # Concord MA
+    for mirror in ingest_osm._DEFAULT_MIRRORS:
+        host = mirror.split("/")[2]
+        try:
+            req = urllib.request.Request(
+                mirror, data=urllib.parse.urlencode({"data": probe}).encode(),
+                headers={"User-Agent": ingest_osm.UA["User-Agent"]})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = json.load(r)
+        except Exception as exc:  # noqa: BLE001
+            check(f"{host}", True, f"unreachable ({type(exc).__name__}) - "
+                  f"transient, fallback list handles it")
+            continue
+        check(f"{host} hosts US data", bool(data.get("elements")),
+              "would cache empty results as facts" if not data.get("elements") else "")
+
+
 def check_pipeline(offline: bool) -> None:
     section("Pipeline (live)")
     if offline:
@@ -219,6 +254,7 @@ def main() -> None:
     check_modules()
     check_secrets()
     check_schema()
+    check_mirrors(args.offline)
     check_pipeline(args.offline)
 
     print(f"\n{_passed} passed, {_failed} failed")

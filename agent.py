@@ -199,9 +199,10 @@ def _print_human(res: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Return businesses and NAICS classification for a town.")
+        description="Return businesses and NAICS classification for a US town. "
+                    "(US only for now; other countries will be added later.)")
     ap.add_argument("town")
-    ap.add_argument("state", help="two-letter code or full name, e.g. MA")
+    ap.add_argument("state", help="two-letter US state code or full name, e.g. MA")
     ap.add_argument("--naics", metavar="PREFIX",
                     help="filter by NAICS prefix, e.g. 72 or 722511")
     ap.add_argument("--refresh", action="store_true",

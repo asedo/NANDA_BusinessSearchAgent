@@ -21,12 +21,15 @@ import derive
 UA = {"User-Agent": config.user_agent()}
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
-# Verified reachable 2026-07-18. overpass.osm.jp was removed: its TLS
-# certificate fails hostname validation, and working around that would mean
-# disabling certificate verification, which is never an acceptable trade.
+# Full-planet mirrors only. Two removals, each a lesson:
+# - overpass.osm.jp: TLS certificate fails hostname validation, and working
+#   around that would mean disabling certificate verification — never worth it.
+# - overpass.osm.ch: the Swiss OSM association's REGIONAL instance. It hosts
+#   only Switzerland, so it answered a Massachusetts query with HTTP 200 and
+#   zero elements, which got cached as a valid "0 businesses" (Somerville,
+#   2026-07-18). Speed probing found it fastest; coverage was never probed.
 _DEFAULT_MIRRORS = (
     "https://overpass-api.de/api/interpreter",    # canonical
-    "https://overpass.osm.ch/api/interpreter",    # fastest in probing
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
 )
@@ -37,9 +40,14 @@ MIRRORS = ((config.get("BSA_OVERPASS_ENDPOINT"),) if config.get("BSA_OVERPASS_EN
 OSM_ATTRIBUTION = "© OpenStreetMap contributors"
 OSM_LICENSE = "ODbL-1.0"
 
+# ".a out ids;" makes the area itself part of the response. A mirror that
+# hosts the region always returns at least that one element, so an empty
+# response means "this mirror does not have the region" — distinguishable
+# from a town that genuinely has no businesses (area present, nothing else).
 QUERY_TMPL = """
 [out:json][timeout:180];
 area({area})->.a;
+.a out ids;
 (
   nwr["shop"](area.a);
   nwr["amenity"~"^(restaurant|cafe|bar|pub|fast_food|ice_cream|food_court|bank|pharmacy|fuel|veterinary|car_wash|car_rental|cinema|theatre|library|post_office)$"](area.a);
@@ -57,6 +65,11 @@ class ResolveError(RuntimeError):
     """Nominatim could not resolve the place to an administrative boundary."""
 
 
+class UnsupportedCountryError(ResolveError):
+    """The place resolved outside the United States, which is out of scope
+    for now. Subclasses ResolveError so existing handlers surface it."""
+
+
 class OverpassError(RuntimeError):
     """Every Overpass mirror failed. Transient far more often than not."""
 
@@ -68,9 +81,13 @@ def resolve_area(place: str) -> dict:
     boundary). A town that resolves to a node or way has no boundary polygon to
     query inside, so we fail with a clear message rather than a confusing
     empty result set.
+
+    US-only for now: Nominatim drops query parts it cannot match, so even a
+    query ending in ", USA" can resolve abroad (e.g. "Paris, France, USA" ->
+    Paris, France). addressdetails gives us the country code to filter on.
     """
     url = NOMINATIM + "?" + urllib.parse.urlencode(
-        {"q": place, "format": "json", "limit": 5})
+        {"q": place, "format": "json", "limit": 5, "addressdetails": 1})
     with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=45) as r:
         hits = json.load(r)
     if not hits:
@@ -84,7 +101,18 @@ def resolve_area(place: str) -> dict:
             f"an administrative boundary; try a more specific query such as "
             f"'Town, County, State, USA'.")
 
-    hit = relations[0]
+    us = [h for h in relations
+          if (h.get("address") or {}).get("country_code") == "us"]
+    if not us:
+        countries = ", ".join(sorted(
+            {(h.get("address") or {}).get("country") or "unknown"
+             for h in relations}))
+        raise UnsupportedCountryError(
+            f"{place!r} resolved to a place in {countries}. This agent "
+            f"currently supports United States towns only; workflows for "
+            f"countries outside the US will be added at a later time.")
+
+    hit = us[0]
     return {
         "area_id": int(hit["osm_id"]) + 3_600_000_000,
         "display_name": hit["display_name"],
@@ -125,12 +153,18 @@ def mark_ingested(conn, place_id: int, ts: str) -> None:
     conn.commit()
 
 
-def run_overpass(query: str, quiet: bool = False) -> tuple[dict, str]:
+def run_overpass(query: str, quiet: bool = False,
+                 expect_area: int | None = None) -> tuple[dict, str]:
     """Try each mirror once, then a second pass with backoff.
 
     Two passes rather than two consecutive attempts per mirror: a 504 means that
     instance is loaded right now, so the next mirror is a better bet than an
     immediate retry against the same one.
+
+    expect_area is the coverage guard. Regional mirrors answer HTTP 200 with
+    zero elements for regions they do not host, which is indistinguishable from
+    an empty town. When set, a response lacking that area element is treated as
+    a mirror failure and the next mirror is tried.
     """
     errors: list[str] = []
     for pass_no in (1, 2):
@@ -141,12 +175,22 @@ def run_overpass(query: str, quiet: bool = False) -> tuple[dict, str]:
                     mirror, data=urllib.parse.urlencode({"data": query}).encode(),
                     headers=UA)
                 with urllib.request.urlopen(req, timeout=240) as r:
-                    return json.load(r), mirror
+                    data = json.load(r)
             except Exception as exc:  # noqa: BLE001 - try the next mirror
                 errors.append(f"{host}: {type(exc).__name__}")
                 if not quiet:
                     print(f"  {host} (pass {pass_no}): {type(exc).__name__}",
                           file=sys.stderr)
+                continue
+            if expect_area is not None and not any(
+                    el.get("type") == "area" and el.get("id") == expect_area
+                    for el in data.get("elements", [])):
+                errors.append(f"{host}: answered but does not host area {expect_area}")
+                if not quiet:
+                    print(f"  {host} (pass {pass_no}): answered but does not "
+                          f"host this region - trying next mirror", file=sys.stderr)
+                continue
+            return data, mirror
         if pass_no == 1:
             time.sleep(5)
     raise OverpassError(
@@ -179,8 +223,10 @@ def ingest(conn, place: str, town: str | None = None,
     conn.commit()
 
     log("querying overpass ...")
-    data, endpoint = run_overpass(query, quiet=quiet)
-    elements = data.get("elements", [])
+    data, endpoint = run_overpass(query, quiet=quiet, expect_area=area_id)
+    # Drop the area element the query emits as coverage proof; it is not a
+    # business. run_overpass has already verified it was present.
+    elements = [el for el in data.get("elements", []) if el.get("type") != "area"]
     log(f"  {len(elements)} elements via {endpoint.split('/')[2]}")
 
     crosswalk = {
