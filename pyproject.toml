@@ -1,0 +1,43 @@
+[project]
+name = "business-search-agent"
+version = "0.1.0"
+description = "Businesses in a US town with NAICS classification and per-fact provenance, for Project NANDA"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+
+# Intentionally empty. Every data source this agent uses is keyless and every
+# module is standard library only - verified by `python verify.py`, which fails
+# if a third-party import appears. Keeping it that way means `git clone` and run,
+# with no install step and nothing to break on a version bump.
+dependencies = []
+
+[project.optional-dependencies]
+# Stage 3 (website extraction) is the only planned dependency. Not yet used.
+extract = ["anthropic>=0.40"]
+
+[project.scripts]
+business-search-agent = "agent:main"
+
+[project.urls]
+Repository = "https://github.com/asedo/NANDA_BusinessSearchAgent"
+"Project NANDA" = "https://projectnanda.org/"
+
+# ---------------------------------------------------------------------------
+# Python version floor
+#
+# requires-python is >=3.11 because that is the oldest interpreter the project
+# has actually been tested against: all 9 modules import and byte-compile
+# cleanly under 3.11.9, and the full pipeline runs there. Development happens
+# on 3.14.5. Older versions may well work - `from __future__ import annotations`
+# is used throughout - but claiming support for something untested would be a
+# guess, so the floor is set where the evidence is.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

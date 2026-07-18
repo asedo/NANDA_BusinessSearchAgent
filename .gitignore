@@ -2,6 +2,10 @@
 #   python naics.py && python ingest_osm.py "Concord, Middlesex County, Massachusetts, USA"
 businesses.db
 agentfacts.json
+
+# Generated exports
+*.xlsx
+*.csv
 businesses.db-wal
 businesses.db-shm
 

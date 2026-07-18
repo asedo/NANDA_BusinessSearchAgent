@@ -1,0 +1,22 @@
+# BusinessSearchAgent — runtime dependencies
+#
+# There are none. This is deliberate, not an oversight.
+#
+# Every data source is keyless and reachable with urllib: OpenStreetMap via
+# Overpass, Nominatim for place resolution, and the OSM wiki for the NAICS
+# crosswalk. SQLite ships with Python. The .xlsx exporter writes the format
+# directly with zipfile, since xlsx is a zip of XML parts.
+#
+# `python verify.py` scans the codebase and FAILS if a third-party import
+# appears, so this file cannot silently drift out of date.
+#
+# Installing is therefore a no-op, but the command is safe to run and keeps
+# tooling that expects a requirements.txt happy:
+#
+#     pip install -r requirements.txt
+#
+# Stage 3 (extracting menus and hours from business websites) will need the
+# Anthropic SDK. It is declared as an optional extra in pyproject.toml rather
+# than here, so the default install stays empty:
+#
+#     pip install -e ".[extract]"

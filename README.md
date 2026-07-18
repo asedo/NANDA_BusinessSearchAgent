@@ -6,7 +6,57 @@ questions and get answers with provenance attached.
 
 Initial test case: **Concord, Massachusetts.**
 
-Standard library only — no pip install required.
+## Setup
+
+```powershell
+.\setup.ps1          # Windows
+```
+```bash
+./setup.sh           # macOS / Linux / WSL / Git Bash
+```
+
+Creates `.venv`, copies `.env.example` to `.env`, and runs 35 verification
+checks. Add `--offline` / `-Offline` to skip the checks that need network.
+
+Then:
+
+```powershell
+.\.venv\Scripts\Activate.ps1     # or: source .venv/bin/activate
+python agent.py Concord MA
+```
+
+**Python 3.11+.** Verified against 3.11.9 and developed on 3.14.5 — the floor is
+set where the project has actually been tested, not guessed.
+
+### There are no dependencies
+
+`requirements.txt` is empty on purpose. Every data source is keyless and
+reachable with `urllib`; SQLite ships with Python; the `.xlsx` exporter writes
+the format directly with `zipfile`, since xlsx is a zip of XML parts.
+
+This is enforced rather than asserted — `python verify.py` walks the AST of every
+module and **fails** if a third-party import appears, so the claim cannot quietly
+rot. The virtual environment exists to pin the interpreter and isolate from
+system Python, not to install anything.
+
+Stage 3 (website extraction) will need the Anthropic SDK. It is declared as an
+optional extra so the default install stays empty:
+
+```bash
+pip install -e ".[extract]"
+```
+
+### Verifying an existing checkout
+
+```bash
+python verify.py             # environment + live pipeline
+python verify.py --offline   # no network calls
+```
+
+Exits non-zero on the first failure, so it works as a CI gate. It checks the
+Python floor, the zero-dependency claim, that every module imports, that `.env`
+is gitignored and untracked, that the schema applies cleanly, and that a live
+lookup returns classified businesses with provenance attached.
 
 ## Quick start — ask the agent about a town
 
@@ -186,6 +236,9 @@ requiring a manual per-entity lookup. Recommend storing officer *names* and
 
 ```
 agent.py         THE AGENT — lookup(town, state) -> businesses + NAICS
+verify.py        environment + pipeline verification (CI gate)
+export.py        export a town to .xlsx or CSV
+setup.ps1 / .sh  create .venv and verify
 schema.sql       tables, indexes, business_fact view
 config.py        env/.env loading, secret masking, self-check
 db.py            connection + schema bootstrap
