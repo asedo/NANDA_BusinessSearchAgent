@@ -16,11 +16,12 @@ import re
 import sys
 import urllib.request
 
+import config
 import db
 
 VINTAGE = "2022"
 WIKI = "https://wiki.openstreetmap.org/w/index.php?title=NAICS/2022&action=raw"
-UA = {"User-Agent": "BusinessSearchAgent/0.1 (+https://projectnanda.org)"}
+UA = {"User-Agent": config.user_agent()}
 
 # Gaps and corrections found by inspecting the crosswalk against real Concord data.
 # code -> (naics, note). Applied only where the wiki has no entry, unless forced.

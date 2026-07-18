@@ -14,17 +14,21 @@ import time
 import urllib.parse
 import urllib.request
 
+import config
 import db
 import derive
 
-UA = {"User-Agent": "BusinessSearchAgent/0.1 (+https://projectnanda.org)"}
+UA = {"User-Agent": config.user_agent()}
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
-MIRRORS = (
+_DEFAULT_MIRRORS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.osm.jp/api/interpreter",
 )
+# BSA_OVERPASS_ENDPOINT pins a single endpoint; blank uses the fallback list.
+MIRRORS = ((config.get("BSA_OVERPASS_ENDPOINT"),) if config.get("BSA_OVERPASS_ENDPOINT")
+           else _DEFAULT_MIRRORS)
 
 OSM_ATTRIBUTION = "© OpenStreetMap contributors"
 OSM_LICENSE = "ODbL-1.0"

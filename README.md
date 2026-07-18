@@ -16,6 +16,41 @@ python ingest_osm.py "Concord, Middlesex County, Massachusetts, USA"
 python query.py stats
 ```
 
+**No credentials are required.** OpenStreetMap, Overpass, and Nominatim are all
+keyless — the pipeline above runs with no `.env` file at all.
+
+## Configuration and secrets
+
+Secrets are loaded by `config.py`, with this precedence:
+
+1. Real process environment variables
+2. Values in a local `.env` file
+3. Defaults in `config.py`
+
+Real env vars win, so production, CI, and containers work without a `.env` ever
+existing on disk. `.env` is gitignored; `.env.example` is the committed template.
+
+```bash
+cp .env.example .env     # then fill in what you need
+python config.py         # self-check — reports set/unset, never prints values
+```
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Stage 3 only | Website extraction (not yet implemented) |
+| `NANDA_REGISTRY_TOKEN` | Not yet | Reserved for AgentFacts publication |
+| `BSA_DB_PATH` | No | Database location |
+| `BSA_CONTACT` | No | Contact appended to the OSM User-Agent |
+| `BSA_OVERPASS_ENDPOINT` | No | Pin one endpoint instead of the mirror list |
+| `ANTHROPIC_MODEL` | No | Model for stage 3 (default `claude-opus-4-8`) |
+
+`python config.py` masks secret values (`sk-a************00`) and verifies that
+`.env` is actually gitignored — an unignored `.env` is the single most damaging
+misconfiguration here, so it is checked rather than assumed.
+
+Use a role address for `BSA_CONTACT`, not a personal one: it is transmitted to
+OSM services in the User-Agent header.
+
 ## Current state (Concord, MA)
 
 | Metric | Count | Share |
@@ -124,12 +159,14 @@ requiring a manual per-entity lookup. Recommend storing officer *names* and
 
 ```
 schema.sql       tables, indexes, business_fact view
+config.py        env/.env loading, secret masking, self-check
 db.py            connection + schema bootstrap
 derive.py        storefront / restaurant inference rules (audit these here)
 naics.py         builds OSM-tag -> NAICS crosswalk from the OSM wiki
 ingest_osm.py    Overpass -> database, idempotent, mirror fallback
 query.py         agent-facing query surface
-businesses.db    SQLite database (generated)
+.env.example     committed template — copy to .env, never commit .env
+businesses.db    SQLite database (generated, gitignored)
 ```
 
 ## Roadmap

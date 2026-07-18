@@ -5,8 +5,10 @@ import datetime as _dt
 import pathlib
 import sqlite3
 
+import config
+
 ROOT = pathlib.Path(__file__).parent
-DB_PATH = ROOT / "businesses.db"
+DB_PATH = pathlib.Path(config.get("BSA_DB_PATH"))
 SCHEMA_PATH = ROOT / "schema.sql"
 
 
