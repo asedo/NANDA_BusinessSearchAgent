@@ -20,10 +20,30 @@ CREATE TABLE IF NOT EXISTS source (
     attribution TEXT                    -- required by ODbL; served in AgentFacts
 );
 
+-- A town the agent has been asked about. Businesses are scoped to a place, so
+-- several towns can coexist in one database without their records mixing.
+-- addr_city is too sparse in OSM (~57%) to serve as the scoping key.
+CREATE TABLE IF NOT EXISTS place (
+    id              INTEGER PRIMARY KEY,
+    query_town      TEXT NOT NULL,      -- as asked: 'Concord'
+    query_state     TEXT NOT NULL,      -- as asked: 'MA'
+    display_name    TEXT NOT NULL,      -- as resolved by Nominatim
+    osm_relation_id INTEGER NOT NULL,
+    area_id         INTEGER NOT NULL,   -- Overpass area id
+    lat             REAL,
+    lon             REAL,
+    first_ingested  TEXT,
+    last_ingested   TEXT,
+    UNIQUE (area_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_place_query ON place(query_town, query_state);
+
 CREATE TABLE IF NOT EXISTS ingest_run (
     id            INTEGER PRIMARY KEY,
     source_id     INTEGER NOT NULL REFERENCES source(id),
-    place         TEXT NOT NULL,        -- 'Concord, Middlesex County, Massachusetts, USA'
+    place_id      INTEGER REFERENCES place(id),
+    place         TEXT NOT NULL,        -- resolved display name, denormalised
     area_id       INTEGER,              -- Overpass area id
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
@@ -47,6 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_source_record_business ON source_record(business_
 
 CREATE TABLE IF NOT EXISTS business (
     id               INTEGER PRIMARY KEY,
+    place_id         INTEGER REFERENCES place(id),
 
     -- identity (OSM is the spine; osm_type+osm_id is the natural key)
     osm_type         TEXT NOT NULL,     -- node | way | relation
@@ -93,6 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_business_name       ON business(name);
 CREATE INDEX IF NOT EXISTS idx_business_naics      ON business(naics);
 CREATE INDEX IF NOT EXISTS idx_business_storefront ON business(has_storefront);
 CREATE INDEX IF NOT EXISTS idx_business_city       ON business(addr_city);
+CREATE INDEX IF NOT EXISTS idx_business_place      ON business(place_id);
 
 -- --------------------------------------------------------------------- naics
 
@@ -136,6 +158,10 @@ CREATE TABLE IF NOT EXISTS extraction (
 CREATE VIEW IF NOT EXISTS business_fact AS
 SELECT
     b.id,
+    b.place_id,
+    p.query_town,
+    p.query_state,
+    p.display_name AS place_name,
     b.name,
     b.primary_tag_key || '=' || b.primary_tag_val AS osm_category,
     b.naics,
@@ -158,6 +184,7 @@ SELECT
     s.attribution,
     b.last_seen  AS as_of
 FROM business b
+LEFT JOIN place   p ON p.id = b.place_id
 JOIN source_record sr ON sr.business_id = b.id
 JOIN ingest_run  ir ON ir.id = sr.ingest_run_id
 JOIN source       s ON s.id = ir.source_id

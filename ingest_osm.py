@@ -21,10 +21,14 @@ import derive
 UA = {"User-Agent": config.user_agent()}
 
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
+# Verified reachable 2026-07-18. overpass.osm.jp was removed: its TLS
+# certificate fails hostname validation, and working around that would mean
+# disabling certificate verification, which is never an acceptable trade.
 _DEFAULT_MIRRORS = (
-    "https://overpass-api.de/api/interpreter",
+    "https://overpass-api.de/api/interpreter",    # canonical
+    "https://overpass.osm.ch/api/interpreter",    # fastest in probing
     "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.osm.jp/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 )
 # BSA_OVERPASS_ENDPOINT pins a single endpoint; blank uses the fallback list.
 MIRRORS = ((config.get("BSA_OVERPASS_ENDPOINT"),) if config.get("BSA_OVERPASS_ENDPOINT")
@@ -49,59 +53,135 @@ out center tags;
 """
 
 
-def resolve_area(place: str) -> tuple[int, str]:
-    """Nominatim place name -> Overpass area id."""
+class ResolveError(RuntimeError):
+    """Nominatim could not resolve the place to an administrative boundary."""
+
+
+class OverpassError(RuntimeError):
+    """Every Overpass mirror failed. Transient far more often than not."""
+
+
+def resolve_area(place: str) -> dict:
+    """Nominatim place name -> {area_id, display_name, osm_relation_id, lat, lon}.
+
+    Overpass can only build an area from a *relation* (an administrative
+    boundary). A town that resolves to a node or way has no boundary polygon to
+    query inside, so we fail with a clear message rather than a confusing
+    empty result set.
+    """
     url = NOMINATIM + "?" + urllib.parse.urlencode(
-        {"q": place, "format": "json", "limit": 1})
+        {"q": place, "format": "json", "limit": 5})
     with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=45) as r:
         hits = json.load(r)
     if not hits:
-        sys.exit(f"could not resolve place: {place!r}")
-    hit = hits[0]
-    if hit["osm_type"] != "relation":
-        sys.exit(f"{place!r} resolved to a {hit['osm_type']}, need a relation "
-                 f"(an administrative boundary)")
-    return int(hit["osm_id"]) + 3_600_000_000, hit["display_name"]
+        raise ResolveError(f"could not resolve place: {place!r}")
+
+    relations = [h for h in hits if h.get("osm_type") == "relation"]
+    if not relations:
+        kinds = ", ".join(sorted({h.get("osm_type", "?") for h in hits}))
+        raise ResolveError(
+            f"{place!r} resolved only to {kinds}, not a relation. Overpass needs "
+            f"an administrative boundary; try a more specific query such as "
+            f"'Town, County, State, USA'.")
+
+    hit = relations[0]
+    return {
+        "area_id": int(hit["osm_id"]) + 3_600_000_000,
+        "display_name": hit["display_name"],
+        "osm_relation_id": int(hit["osm_id"]),
+        "lat": float(hit["lat"]) if hit.get("lat") else None,
+        "lon": float(hit["lon"]) if hit.get("lon") else None,
+    }
 
 
-def run_overpass(query: str) -> tuple[dict, str]:
-    """Try mirrors in order. The public instance 504s under load routinely."""
-    last = None
-    for mirror in MIRRORS:
-        for attempt in (1, 2):
+def upsert_place(conn, town: str, state: str, resolved: dict) -> int:
+    """Record the resolved place, leaving last_ingested untouched.
+
+    last_ingested is set only by mark_ingested(), after Overpass has actually
+    answered. Setting it here would mean a failed fetch leaves behind a place
+    that looks freshly ingested with zero businesses - and the agent would then
+    serve "0 businesses" as a cached fact rather than reporting the failure.
+    """
+    conn.execute(
+        """INSERT INTO place (query_town, query_state, display_name,
+                              osm_relation_id, area_id, lat, lon)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(area_id) DO UPDATE SET
+             query_town=excluded.query_town, query_state=excluded.query_state,
+             display_name=excluded.display_name""",
+        (town, state, resolved["display_name"], resolved["osm_relation_id"],
+         resolved["area_id"], resolved["lat"], resolved["lon"]))
+    conn.commit()
+    return conn.execute("SELECT id FROM place WHERE area_id=?",
+                        (resolved["area_id"],)).fetchone()["id"]
+
+
+def mark_ingested(conn, place_id: int, ts: str) -> None:
+    """Called only on a successful fetch. This is what makes the cache valid."""
+    conn.execute(
+        """UPDATE place SET last_ingested=?,
+             first_ingested=COALESCE(first_ingested, ?)
+           WHERE id=?""", (ts, ts, place_id))
+    conn.commit()
+
+
+def run_overpass(query: str, quiet: bool = False) -> tuple[dict, str]:
+    """Try each mirror once, then a second pass with backoff.
+
+    Two passes rather than two consecutive attempts per mirror: a 504 means that
+    instance is loaded right now, so the next mirror is a better bet than an
+    immediate retry against the same one.
+    """
+    errors: list[str] = []
+    for pass_no in (1, 2):
+        for mirror in MIRRORS:
+            host = mirror.split("/")[2]
             try:
                 req = urllib.request.Request(
                     mirror, data=urllib.parse.urlencode({"data": query}).encode(),
                     headers=UA)
                 with urllib.request.urlopen(req, timeout=240) as r:
                     return json.load(r), mirror
-            except Exception as exc:  # noqa: BLE001 - report and try next mirror
-                last = exc
-                print(f"  {mirror.split('/')[2]} attempt {attempt}: "
-                      f"{type(exc).__name__}", file=sys.stderr)
-                time.sleep(4)
-    sys.exit(f"all Overpass mirrors failed; last error: {last}")
+            except Exception as exc:  # noqa: BLE001 - try the next mirror
+                errors.append(f"{host}: {type(exc).__name__}")
+                if not quiet:
+                    print(f"  {host} (pass {pass_no}): {type(exc).__name__}",
+                          file=sys.stderr)
+        if pass_no == 1:
+            time.sleep(5)
+    raise OverpassError(
+        "all Overpass mirrors failed - this is usually transient load; retry "
+        "in a minute.\n  " + "\n  ".join(errors))
 
 
-def ingest(conn, place: str) -> None:
+def ingest(conn, place: str, town: str | None = None,
+           state: str | None = None, quiet: bool = False) -> dict:
+    """Ingest one town. Returns a summary dict for programmatic callers."""
+    def log(*a):
+        if not quiet:
+            print(*a)
+
     source_id = db.upsert_source(conn, "openstreetmap", "https://www.openstreetmap.org",
                                  OSM_LICENSE, OSM_ATTRIBUTION)
-    area_id, display = resolve_area(place)
-    print(f"resolved: {display}\n  overpass area {area_id}")
+    resolved = resolve_area(place)
+    area_id, display = resolved["area_id"], resolved["display_name"]
+    log(f"resolved: {display}\n  overpass area {area_id}")
+
+    place_id = upsert_place(conn, town or place, state or "", resolved)
 
     query = QUERY_TMPL.format(area=area_id)
     started = db.now()
     cur = conn.execute(
-        """INSERT INTO ingest_run (source_id, place, area_id, started_at, query)
-           VALUES (?,?,?,?,?)""",
-        (source_id, display, area_id, started, query))
+        """INSERT INTO ingest_run (source_id, place_id, place, area_id, started_at, query)
+           VALUES (?,?,?,?,?,?)""",
+        (source_id, place_id, display, area_id, started, query))
     run_id = cur.lastrowid
     conn.commit()
 
-    print("querying overpass ...")
-    data, endpoint = run_overpass(query)
+    log("querying overpass ...")
+    data, endpoint = run_overpass(query, quiet=quiet)
     elements = data.get("elements", [])
-    print(f"  {len(elements)} elements via {endpoint.split('/')[2]}")
+    log(f"  {len(elements)} elements via {endpoint.split('/')[2]}")
 
     crosswalk = {
         r["osm_tag"]: (r["naics"], r["naics_title"])
@@ -134,7 +214,7 @@ def ingest(conn, place: str) -> None:
         lon = el.get("lon") or (el.get("center") or {}).get("lon")
 
         row = (
-            el["type"], el["id"], name, lat, lon,
+            place_id, el["type"], el["id"], name, lat, lon,
             tags.get("addr:housenumber"), tags.get("addr:street"),
             tags.get("addr:city"), tags.get("addr:state"), tags.get("addr:postcode"),
             derive.first(tags, "phone", "contact:phone"),
@@ -152,14 +232,15 @@ def ingest(conn, place: str) -> None:
 
         conn.execute("""
             INSERT INTO business (
-              osm_type, osm_id, name, lat, lon,
+              place_id, osm_type, osm_id, name, lat, lon,
               addr_housenumber, addr_street, addr_city, addr_state, addr_postcode,
               phone, website, opening_hours, brand, cuisine,
               primary_tag_key, primary_tag_val,
               naics, naics_title, naics_vintage, naics_source,
               has_storefront, is_restaurant, first_seen, last_seen)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(osm_type, osm_id) DO UPDATE SET
+              place_id=excluded.place_id,
               name=excluded.name, lat=excluded.lat, lon=excluded.lon,
               addr_housenumber=excluded.addr_housenumber,
               addr_street=excluded.addr_street, addr_city=excluded.addr_city,
@@ -191,12 +272,27 @@ def ingest(conn, place: str) -> None:
     conn.execute(
         "UPDATE ingest_run SET finished_at=?, endpoint=?, element_count=? WHERE id=?",
         (db.now(), endpoint, len(elements), run_id))
+    # Only now is the cache valid: Overpass answered and rows are committed.
+    mark_ingested(conn, place_id, ts)
     conn.commit()
 
     named = inserted + updated
-    print(f"\n  inserted {inserted}, updated {updated}, skipped {skipped} (unnamed)")
-    print(f"  NAICS assigned to {classified}/{named} "
-          f"({100 * classified / named:.0f}%)" if named else "")
+    log(f"\n  inserted {inserted}, updated {updated}, skipped {skipped} (unnamed)")
+    if named:
+        log(f"  NAICS assigned to {classified}/{named} ({100 * classified / named:.0f}%)")
+
+    return {
+        "place_id": place_id,
+        "display_name": display,
+        "area_id": area_id,
+        "elements": len(elements),
+        "inserted": inserted,
+        "updated": updated,
+        "skipped_unnamed": skipped,
+        "classified": classified,
+        "endpoint": endpoint,
+        "as_of": ts,
+    }
 
 
 if __name__ == "__main__":
@@ -204,4 +300,7 @@ if __name__ == "__main__":
         "Concord, Middlesex County, Massachusetts, USA"
     conn = db.connect()
     db.init(conn)
-    ingest(conn, place)
+    try:
+        ingest(conn, place)
+    except (ResolveError, OverpassError) as exc:
+        sys.exit(str(exc))

@@ -23,6 +23,40 @@ VINTAGE = "2022"
 WIKI = "https://wiki.openstreetmap.org/w/index.php?title=NAICS/2022&action=raw"
 UA = {"User-Agent": config.user_agent()}
 
+# NAICS 2-digit sector names. The crosswalk only contains codes that carry OSM
+# tags, so it has no 2-digit rows; deriving a sector name from an arbitrary
+# sub-industry produces wrong labels (72 -> "Drinking Places" rather than
+# "Accommodation and Food Services").
+SECTORS = {
+    "11": "Agriculture, Forestry, Fishing and Hunting",
+    "21": "Mining, Quarrying, and Oil and Gas Extraction",
+    "22": "Utilities",
+    "23": "Construction",
+    "31": "Manufacturing", "32": "Manufacturing", "33": "Manufacturing",
+    "42": "Wholesale Trade",
+    "44": "Retail Trade", "45": "Retail Trade",
+    "48": "Transportation and Warehousing", "49": "Transportation and Warehousing",
+    "51": "Information",
+    "52": "Finance and Insurance",
+    "53": "Real Estate and Rental and Leasing",
+    "54": "Professional, Scientific, and Technical Services",
+    "55": "Management of Companies and Enterprises",
+    "56": "Administrative, Support, and Waste Management Services",
+    "61": "Educational Services",
+    "62": "Health Care and Social Assistance",
+    "71": "Arts, Entertainment, and Recreation",
+    "72": "Accommodation and Food Services",
+    "81": "Other Services (except Public Administration)",
+    "92": "Public Administration",
+}
+
+
+def sector_of(code: str | None) -> tuple[str | None, str | None]:
+    """6-digit NAICS -> (2-digit sector code, sector name)."""
+    if not code:
+        return None, None
+    return code[:2], SECTORS.get(code[:2])
+
 # Gaps and corrections found by inspecting the crosswalk against real Concord data.
 # code -> (naics, note). Applied only where the wiki has no entry, unless forced.
 MANUAL_OVERRIDES: dict[str, tuple[str, str]] = {

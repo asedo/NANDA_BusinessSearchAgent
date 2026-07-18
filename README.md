@@ -8,16 +8,43 @@ Initial test case: **Concord, Massachusetts.**
 
 Standard library only — no pip install required.
 
-## Quick start
+## Quick start — ask the agent about a town
 
 ```bash
-python naics.py                                            # build the NAICS crosswalk
-python ingest_osm.py "Concord, Middlesex County, Massachusetts, USA"
-python query.py stats
+python agent.py Concord MA                # businesses + NAICS for a town
+python agent.py Lexington MA --json       # agent-to-agent JSON
+python agent.py Concord MA --naics 72     # food service only (NAICS prefix)
+python agent.py Concord MA --refresh      # force re-fetch, ignore cache
+```
+
+Everything bootstraps on first call: the NAICS crosswalk builds itself, the town
+is resolved against OpenStreetMap, and results are cached for 7 days.
+
+```python
+from agent import lookup
+result = lookup("Concord", "MA", naics_prefix="722511")
 ```
 
 **No credentials are required.** OpenStreetMap, Overpass, and Nominatim are all
-keyless — the pipeline above runs with no `.env` file at all.
+keyless — this runs with no `.env` file at all.
+
+### Verified across three towns
+
+| Query | Resolved | Businesses | With NAICS | Storefronts | Restaurants |
+|---|---|---:|---:|---:|---:|
+| `Concord MA` | Middlesex County, MA | 156 | 141 (90%) | 140 | 31 |
+| `Lexington MA` | Middlesex County, MA | 195 | 181 (93%) | 167 | 42 |
+| `Concord NH` | Merrimack County, NH | 588 | 519 (88%) | 491 | 123 |
+
+Concord MA and Concord NH resolve independently, which is the point of the
+`place` table — `addr_city` is only ~57% populated in OSM and cannot scope a town.
+
+### Why there is no LLM in this path
+
+Structured input (town, state) produces structured output (businesses + NAICS).
+Nothing in that requires judgement, so a model would add cost, latency, and
+nondeterminism for no gain. The LLM belongs at the stage-3 boundary, where
+unstructured website HTML has to become structured fields.
 
 ## Configuration and secrets
 
@@ -158,16 +185,37 @@ requiring a manual per-entity lookup. Recommend storing officer *names* and
 ## Files
 
 ```
+agent.py         THE AGENT — lookup(town, state) -> businesses + NAICS
 schema.sql       tables, indexes, business_fact view
 config.py        env/.env loading, secret masking, self-check
 db.py            connection + schema bootstrap
 derive.py        storefront / restaurant inference rules (audit these here)
-naics.py         builds OSM-tag -> NAICS crosswalk from the OSM wiki
+naics.py         OSM-tag -> NAICS crosswalk + 2-digit sector names
 ingest_osm.py    Overpass -> database, idempotent, mirror fallback
-query.py         agent-facing query surface
+query.py         low-level SQL query surface (single-town, debugging)
 .env.example     committed template — copy to .env, never commit .env
 businesses.db    SQLite database (generated, gitignored)
 ```
+
+## Operational hazards handled
+
+**A failed fetch must never look like an empty town.** `place.last_ingested` is
+written only by `mark_ingested()`, after Overpass has actually answered. An
+earlier version set it when the place was resolved, so a failed fetch left a
+place that appeared freshly ingested with zero businesses — and the agent then
+served "0 businesses" as a cached fact. Silently wrong answers are worse than
+errors, especially for a consuming agent that cannot tell the difference.
+
+**Overpass mirrors fail routinely.** `run_overpass()` tries each mirror once,
+then makes a second pass with backoff — a 504 means that instance is loaded, so
+the next mirror beats an immediate retry. `overpass.osm.jp` was removed from the
+list: its TLS certificate fails hostname validation, and the only workaround
+would be disabling certificate verification.
+
+**Towns must resolve to an OSM relation.** Overpass builds query areas from
+administrative boundaries; a town resolving only to a node or way has no polygon
+to search inside. `resolve_area()` scans up to five Nominatim hits for a relation
+and raises a clear error rather than silently returning nothing.
 
 ## Roadmap
 

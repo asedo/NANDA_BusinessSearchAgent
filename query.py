@@ -19,39 +19,13 @@ import json
 import sys
 
 import db
+from naics import SECTORS as NAICS_SECTORS  # single source of truth
 
 FACT_COLS = """id, name, osm_category, naics, naics_title, naics_vintage,
                naics_source, has_storefront, is_restaurant, street_address,
                addr_city, addr_postcode, lat, lon, phone, website,
                opening_hours, cuisine, source_name, source_license,
                attribution, as_of"""
-
-# NAICS 2-digit sector names. The crosswalk only contains codes that carry OSM
-# tags, so it has no 2-digit rows to look these up from - deriving a sector name
-# from an arbitrary sub-industry gives wrong labels (e.g. 72 -> "Drinking Places"
-# instead of "Accommodation and Food Services").
-NAICS_SECTORS = {
-    "11": "Agriculture, Forestry, Fishing and Hunting",
-    "21": "Mining, Quarrying, and Oil and Gas Extraction",
-    "22": "Utilities",
-    "23": "Construction",
-    "31": "Manufacturing", "32": "Manufacturing", "33": "Manufacturing",
-    "42": "Wholesale Trade",
-    "44": "Retail Trade", "45": "Retail Trade",
-    "48": "Transportation and Warehousing", "49": "Transportation and Warehousing",
-    "51": "Information",
-    "52": "Finance and Insurance",
-    "53": "Real Estate and Rental and Leasing",
-    "54": "Professional, Scientific, and Technical Services",
-    "55": "Management of Companies and Enterprises",
-    "56": "Administrative, Support, and Waste Management Services",
-    "61": "Educational Services",
-    "62": "Health Care and Social Assistance",
-    "71": "Arts, Entertainment, and Recreation",
-    "72": "Accommodation and Food Services",
-    "81": "Other Services (except Public Administration)",
-    "92": "Public Administration",
-}
 
 
 def rows_to_json(rows) -> str:
