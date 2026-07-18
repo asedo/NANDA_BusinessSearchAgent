@@ -53,14 +53,48 @@ def check_python() -> None:
           "recommended, not required" if sys.prefix == sys.base_prefix else sys.prefix)
 
 
+def _declared_optional() -> set[str]:
+    """Package names declared under [project.optional-dependencies]."""
+    try:
+        import tomllib  # stdlib since 3.11, which is our floor
+        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return set()
+    names: set[str] = set()
+    for group in data.get("project", {}).get("optional-dependencies", {}).values():
+        for spec in group:
+            names.add(spec.split()[0].split(">")[0].split("=")[0]
+                      .split("<")[0].split("[")[0].strip())
+    return names
+
+
 def check_dependencies() -> None:
-    """The zero-dependency claim must be enforced, not just asserted."""
+    """Enforce the dependency contract rather than merely asserting it.
+
+    Three distinct failures are possible:
+      1. An undeclared third-party import appeared.
+      2. A declared *optional* dependency is imported at module level, which
+         would break the base install for everyone who never asked for it.
+      3. Neither - the base install stays pure standard library.
+    """
     section("Dependencies")
     stdlib = set(sys.stdlib_module_names)
     local = {p.stem for p in ROOT.glob("*.py")}
-    third: dict[str, set[str]] = {}
+    optional = _declared_optional()
+
+    undeclared: dict[str, set[str]] = {}
+    eager_optional: dict[str, set[str]] = {}
+    lazy_optional: dict[str, set[str]] = {}
+
     for f in sorted(ROOT.glob("*.py")):
         tree = ast.parse(f.read_text(encoding="utf-8"))
+        # Any import whose nearest enclosing scope is a function is "lazy".
+        lazy_nodes: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for sub in ast.walk(node):
+                    if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                        lazy_nodes.add(id(sub))
         for node in ast.walk(tree):
             mods: list[str] = []
             if isinstance(node, ast.Import):
@@ -68,18 +102,31 @@ def check_dependencies() -> None:
             elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 mods = [node.module.split(".")[0]]
             for m in mods:
-                if m not in stdlib and m not in local and m != "__future__":
-                    third.setdefault(m, set()).add(f.name)
-    check("zero third-party imports", not third,
-          "standard library only" if not third
-          else f"found {', '.join(sorted(third))}")
+                if m in stdlib or m in local or m == "__future__":
+                    continue
+                bucket = (lazy_optional if id(node) in lazy_nodes else eager_optional) \
+                    if m in optional else undeclared
+                bucket.setdefault(m, set()).add(f.name)
+
+    check("no undeclared third-party imports", not undeclared,
+          "base install is standard library only" if not undeclared
+          else f"found {', '.join(sorted(undeclared))} — declare in pyproject.toml")
+
+    if optional:
+        check("optional dependencies imported lazily", not eager_optional,
+              f"{', '.join(sorted(lazy_optional))} imported inside functions"
+              if lazy_optional and not eager_optional
+              else (f"{', '.join(sorted(eager_optional))} imported at module level "
+                    f"— would break the base install" if eager_optional
+                    else "none imported"))
 
 
 def check_files() -> None:
     section("Project files")
     for name in ("schema.sql", "config.py", "db.py", "derive.py", "naics.py",
                  "ingest_osm.py", "agent.py", "query.py", "export.py",
-                 "agentfacts.py", ".env.example", "pyproject.toml"):
+                 "agentfacts.py", "enrich_web.py", "verify.py",
+                 ".env.example", "pyproject.toml", "requirements.txt"):
         check(name, (ROOT / name).exists())
 
 
@@ -87,7 +134,7 @@ def check_modules() -> None:
     section("Imports")
     import importlib
     for name in ("config", "db", "derive", "naics", "ingest_osm",
-                 "query", "agent", "agentfacts", "export"):
+                 "query", "agent", "agentfacts", "export", "enrich_web"):
         try:
             importlib.import_module(name)
             check(f"import {name}", True)

@@ -30,6 +30,9 @@ import ingest_osm
 # (header, key, type) - "s" forces text, preserving leading zeros.
 COLUMNS: list[tuple[str, str, str]] = [
     ("Business Name",   "name",              "s"),
+    ("Active Web Query Description", "active_web_query_description", "s"),
+    ("Description Confidence",       "description_confidence",       "s"),
+    ("Description Is Chain Page",    "description_is_chain_page",    "b"),
     ("NAICS",           "naics",             "s"),
     ("NAICS Industry",  "naics_title",       "s"),
     ("NAICS Sector",    "naics_sector",      "s"),
@@ -49,7 +52,7 @@ COLUMNS: list[tuple[str, str, str]] = [
     ("Cuisine",         "cuisine",           "s"),
 ]
 
-WIDTHS = [34, 9, 38, 8, 34, 14, 22, 10, 10, 30, 16, 11, 11, 11, 22, 42, 34, 24]
+WIDTHS = [34, 78, 12, 12, 9, 38, 8, 34, 14, 22, 10, 10, 30, 16, 11, 11, 11, 22, 42, 34, 24]
 
 
 # --------------------------------------------------------------- xlsx writer

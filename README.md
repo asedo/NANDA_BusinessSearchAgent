@@ -96,6 +96,55 @@ Nothing in that requires judgement, so a model would add cost, latency, and
 nondeterminism for no gain. The LLM belongs at the stage-3 boundary, where
 unstructured website HTML has to become structured fields.
 
+## Website descriptions (stage 3)
+
+For every business that lists a URL, `enrich_web.py` reads the site and generates
+a one-sentence factual description, stored as **`active_web_query_description`**.
+
+```bash
+pip install -e ".[extract]"          # installs the Anthropic SDK
+# set ANTHROPIC_API_KEY in .env
+
+python enrich_web.py Concord MA --dry-run --limit 5   # fetch only, no API calls
+python enrich_web.py Concord MA --limit 5             # try a few for real
+python enrich_web.py Concord MA                       # the whole town
+python enrich_web.py --all                            # every town
+python enrich_web.py Concord MA --refresh             # regenerate existing
+```
+
+The column appears in `agent.py` output, in `business_fact`, and as a
+spreadsheet column named *Active Web Query Description*. Alongside it:
+
+| Field | Meaning |
+|---|---|
+| `active_web_query_description` | One factual sentence about the business |
+| `description_confidence` | `high` / `medium` / `low`, as judged by the model |
+| `description_is_chain_page` | True when the URL is a corporate store-locator rather than the business's own site |
+| `description_model` | Which model produced it |
+| `description_generated_at` | When |
+
+**Why `is_chain_page` exists:** of Concord's nine restaurant URLs, four point at
+Dunkin'/Starbucks store-locator pages. A description generated from those
+describes the chain, not the local outlet. Flagging it beats silently mixing the
+two.
+
+**Costs money.** Roughly $1–2 per town on `claude-opus-4-8` (Concord MA has 48
+sites; 342 across all three towns). Override with `ANTHROPIC_MODEL` in `.env`.
+
+### Crawling conduct
+
+- `robots.txt` fetched and honoured per host, cached per run
+- one request per second, single-threaded
+- identifying User-Agent, with `BSA_CONTACT` appended when set
+- response bodies capped at 600 KB, 25-second timeouts
+- non-HTML content types rejected before download
+
+Raw HTML is saved to `web_snapshot` **before** extraction runs, so a revised
+prompt can be re-run over stored pages without re-crawling anyone's site.
+
+Expect some failures — around 1 in 8 sites in testing had TLS problems, served
+no server-rendered text, or timed out. One bad site never stops the run.
+
 ## Configuration and secrets
 
 Secrets are loaded by `config.py`, with this precedence:
@@ -238,6 +287,7 @@ requiring a manual per-entity lookup. Recommend storing officer *names* and
 agent.py         THE AGENT — lookup(town, state) -> businesses + NAICS
 verify.py        environment + pipeline verification (CI gate)
 export.py        export a town to .xlsx or CSV
+enrich_web.py    stage 3 — website -> one-sentence description (needs API key)
 setup.ps1 / .sh  create .venv and verify
 schema.sql       tables, indexes, business_fact view
 config.py        env/.env loading, secret masking, self-check

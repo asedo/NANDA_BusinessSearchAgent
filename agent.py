@@ -122,6 +122,15 @@ def lookup(town: str, state: str, *, naics_prefix: str | None = None,
             "website": r["website"],
             "opening_hours": r["opening_hours"],
             "cuisine": r["cuisine"],
+            # Stage 3: generated from the business's own website by enrich_web.py.
+            # None until that has been run for this business.
+            "active_web_query_description": r["active_web_query_description"],
+            "description_confidence": r["description_confidence"],
+            "description_is_chain_page": (
+                bool(r["description_is_chain_page"])
+                if r["description_is_chain_page"] is not None else None),
+            "description_model": r["description_model"],
+            "description_generated_at": r["description_generated_at"],
         })
 
     with_naics = sum(1 for b in businesses if b["naics"])

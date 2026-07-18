@@ -149,8 +149,16 @@ CREATE TABLE IF NOT EXISTS extraction (
     extracted_at    TEXT NOT NULL,
     model           TEXT,
     schema_version  TEXT,
+
+    -- One-sentence description generated from the business's own website.
+    active_web_query_description TEXT,
+    confidence      TEXT,     -- high | medium | low, as judged by the model
+    is_chain_page   INTEGER,  -- 1 when the URL is a corporate store-locator
+                              -- page rather than the business's own site
     payload_json    TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_extraction_business ON extraction(business_id);
 
 -- ---------------------------------------------------------------------- view
 -- The agent-facing projection: only facts we can attribute.
@@ -179,6 +187,23 @@ SELECT
     b.website,
     b.opening_hours,
     b.cuisine,
+
+    -- Latest website-derived description, if one has been generated.
+    (SELECT e.active_web_query_description FROM extraction e
+      WHERE e.business_id = b.id AND e.active_web_query_description IS NOT NULL
+      ORDER BY e.extracted_at DESC LIMIT 1) AS active_web_query_description,
+    (SELECT e.confidence FROM extraction e
+      WHERE e.business_id = b.id AND e.active_web_query_description IS NOT NULL
+      ORDER BY e.extracted_at DESC LIMIT 1) AS description_confidence,
+    (SELECT e.is_chain_page FROM extraction e
+      WHERE e.business_id = b.id AND e.active_web_query_description IS NOT NULL
+      ORDER BY e.extracted_at DESC LIMIT 1) AS description_is_chain_page,
+    (SELECT e.model FROM extraction e
+      WHERE e.business_id = b.id AND e.active_web_query_description IS NOT NULL
+      ORDER BY e.extracted_at DESC LIMIT 1) AS description_model,
+    (SELECT e.extracted_at FROM extraction e
+      WHERE e.business_id = b.id AND e.active_web_query_description IS NOT NULL
+      ORDER BY e.extracted_at DESC LIMIT 1) AS description_generated_at,
     s.name       AS source_name,
     s.license    AS source_license,
     s.attribution,
