@@ -128,7 +128,7 @@ def check_files() -> None:
     for name in ("schema.sql", "config.py", "db.py", "derive.py", "naics.py",
                  "ingest_osm.py", "agent.py", "query.py", "export.py",
                  "agentfacts.py", "enrich_web.py", "verify.py",
-                 ".env.example", "pyproject.toml", "requirements.txt"):
+                 "pyproject.toml", "requirements.txt"):
         check(name, (ROOT / name).exists())
 
 
@@ -154,7 +154,6 @@ def check_secrets() -> None:
               "CRITICAL: .env would be committed" if r.returncode else "")
     else:
         check(".env absent (fine — no secrets required yet)", True)
-    check(".env.example present", (ROOT / ".env.example").exists())
 
     r = subprocess.run(["git", "ls-files"], cwd=ROOT,
                        capture_output=True, text=True)

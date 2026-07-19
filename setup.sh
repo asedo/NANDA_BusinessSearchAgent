@@ -68,12 +68,13 @@ echo "  upgrading pip (quiet) ..."
 "$VENV_PY" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
 echo "  dependencies: none required (standard library only)"
 
-# --- .env from template ------------------------------------------------------
-if [ ! -f .env ]; then
-    cp .env.example .env
-    echo "  .env        : created from .env.example (all values blank)"
+# --- .env is optional --------------------------------------------------------
+# No credentials are required for the core pipeline. Create .env by hand only
+# if you need optional settings (e.g. ANTHROPIC_API_KEY for enrich_web.py).
+if [ -f .env ]; then
+    echo "  .env        : found, will be loaded (never committed)"
 else
-    echo "  .env        : already exists, left untouched"
+    echo "  .env        : none (fine - no credentials required)"
 fi
 
 # --- verify -------------------------------------------------------------------

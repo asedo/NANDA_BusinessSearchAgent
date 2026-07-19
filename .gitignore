@@ -9,10 +9,9 @@ agentfacts.json
 businesses.db-wal
 businesses.db-shm
 
-# Secrets — never commit. .env.example is the committed template.
+# Secrets — never commit.
 .env
 .env.*
-!.env.example
 *.pem
 *.key
 credentials.json

@@ -79,8 +79,8 @@ def require(key: str) -> str:
     if not val:
         raise RuntimeError(
             f"{key} is not set.\n"
-            f"  Set it in the environment, or add it to {ENV_PATH.name} "
-            f"(copy .env.example to .env and fill it in).\n"
+            f"  Set it in the environment, or create a {ENV_PATH.name} file "
+            f"containing a line like: {key}=your-value\n"
             f"  .env is gitignored and must never be committed."
         )
     return val

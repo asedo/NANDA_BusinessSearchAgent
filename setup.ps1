@@ -63,12 +63,13 @@ Write-Host "  upgrading pip (quiet) ..."
 & $venvPython -m pip install --quiet --upgrade pip 2>&1 | Out-Null
 Write-Host "  dependencies: none required (standard library only)"
 
-# --- .env from template ------------------------------------------------------
-if (-not (Test-Path ".env")) {
-    Copy-Item ".env.example" ".env"
-    Write-Host "  .env        : created from .env.example (all values blank)"
+# --- .env is optional --------------------------------------------------------
+# No credentials are required for the core pipeline. Create .env by hand only
+# if you need optional settings (e.g. ANTHROPIC_API_KEY for enrich_web.py).
+if (Test-Path ".env") {
+    Write-Host "  .env        : found, will be loaded (never committed)"
 } else {
-    Write-Host "  .env        : already exists, left untouched"
+    Write-Host "  .env        : none (fine - no credentials required)"
 }
 
 # --- verify -------------------------------------------------------------------

@@ -15,8 +15,8 @@ Initial test case: **Concord, Massachusetts.**
 ./setup.sh           # macOS / Linux / WSL / Git Bash
 ```
 
-Creates `.venv`, copies `.env.example` to `.env`, and runs 35 verification
-checks. Add `--offline` / `-Offline` to skip the checks that need network.
+Creates `.venv` and runs 33 verification checks. Add `--offline` / `-Offline`
+to skip the checks that need network.
 
 Then:
 
@@ -162,10 +162,11 @@ Secrets are loaded by `config.py`, with this precedence:
 3. Defaults in `config.py`
 
 Real env vars win, so production, CI, and containers work without a `.env` ever
-existing on disk. `.env` is gitignored; `.env.example` is the committed template.
+existing on disk. `.env` is gitignored and optional — the core pipeline needs
+no credentials at all. Create one by hand only if you need optional settings:
 
 ```bash
-cp .env.example .env     # then fill in what you need
+echo "ANTHROPIC_API_KEY=sk-..." >> .env   # only if you use enrich_web.py
 python config.py         # self-check — reports set/unset, never prints values
 ```
 
@@ -305,7 +306,7 @@ naics.py         OSM-tag -> NAICS crosswalk + 2-digit sector names
 ingest_osm.py    Overpass -> database, idempotent, mirror fallback
 query.py         low-level SQL query surface (single-town, debugging)
 agentfacts.py    generates the NANDA AgentFacts descriptor (provisional schema)
-.env.example     committed template — copy to .env, never commit .env
+.env             optional local settings (gitignored, never commit)
 businesses.db    SQLite database (generated, gitignored)
 ```
 
